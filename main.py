@@ -94,9 +94,11 @@ def xp_progress_bar(current_xp, level, bar_length=10):
 
 @bot.event
 async def on_ready():
-    await bot.tree.sync()
+    guild = discord.Object(id=1448559579653996637)
+    await bot.tree.sync(guild=guild)
     voice_xp_loop.start()
-    print(f"🤖 Logged in as {bot.user}")
+    print(f"Logged in as {bot.user}")
+
 
 @bot.event
 async def on_message(message):
@@ -234,5 +236,6 @@ if not TOKEN:
     raise RuntimeError("DISCORD_TOKEN is not set")
 
 bot.run(TOKEN)
+
 
 
