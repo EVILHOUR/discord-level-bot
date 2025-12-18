@@ -16,7 +16,8 @@ XP_PER_VOICE_INTERVAL = 15
 MESSAGE_COOLDOWN_SECONDS = 60
 VOICE_XP_INTERVAL_SECONDS = 60
 
-LEVEL_UP_CHANNEL_ID = 1449164944376467578  # <-- YOUR CHANNEL ID
+LEVEL_UP_CHANNEL_ID = 1449164944376467578  # YOUR CHANNEL ID
+GUILD_ID = 1448559579653996637            # YOUR SERVER ID
 
 # =========================
 # INTENTS
@@ -37,10 +38,7 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL is not set")
 
-conn = psycopg2.connect(
-    DATABASE_URL,
-    sslmode="require"
-)
+conn = psycopg2.connect(DATABASE_URL, sslmode="require")
 cursor = conn.cursor()
 print("✅ Connected to PostgreSQL")
 
@@ -84,9 +82,8 @@ def xp_progress_bar(current_xp, level, bar_length=10):
 
     bar = "🟦" * filled + "⬜" * empty
     percent = int(progress * 100)
-    xp_remaining = xp_needed - xp_into_level
 
-    return bar, percent, xp_remaining, next_level_xp
+    return bar, percent, next_level_xp
 
 # =========================
 # EVENTS
@@ -94,11 +91,11 @@ def xp_progress_bar(current_xp, level, bar_length=10):
 
 @bot.event
 async def on_ready():
-    guild = discord.Object(id=1448559579653996637)
+    guild = discord.Object(id=GUILD_ID)
     await bot.tree.sync(guild=guild)
     voice_xp_loop.start()
-    print(f"Logged in as {bot.user}")
-
+    print(f"✅ Logged in as {bot.user}")
+    print("✅ Slash commands synced")
 
 @bot.event
 async def on_message(message):
@@ -203,7 +200,7 @@ async def voice_xp_loop():
     conn.commit()
 
 # =========================
-# COMMANDS
+# PREFIX COMMAND
 # =========================
 
 @bot.command()
@@ -219,9 +216,41 @@ async def level(ctx):
         return
 
     xp, level = data
-    bar, percent, xp_remaining, next_xp = xp_progress_bar(xp, level)
+    bar, percent, next_xp = xp_progress_bar(xp, level)
 
     await ctx.send(
+        f"⭐ **Level {level}**\n"
+        f"{bar} **{percent}%**\n"
+        f"XP: **{xp} / {next_xp}**"
+    )
+
+# =========================
+# SLASH COMMAND
+# =========================
+
+@bot.tree.command(
+    name="level",
+    description="Check your level and XP",
+    guild=discord.Object(id=GUILD_ID)
+)
+async def slash_level(interaction: discord.Interaction):
+    cursor.execute(
+        "SELECT xp, level FROM users WHERE user_id=%s",
+        (interaction.user.id,)
+    )
+    data = cursor.fetchone()
+
+    if not data:
+        await interaction.response.send_message(
+            "You have no level yet.",
+            ephemeral=True
+        )
+        return
+
+    xp, level = data
+    bar, percent, next_xp = xp_progress_bar(xp, level)
+
+    await interaction.response.send_message(
         f"⭐ **Level {level}**\n"
         f"{bar} **{percent}%**\n"
         f"XP: **{xp} / {next_xp}**"
@@ -236,6 +265,7 @@ if not TOKEN:
     raise RuntimeError("DISCORD_TOKEN is not set")
 
 bot.run(TOKEN)
+
 
 
 
