@@ -4,7 +4,6 @@ import psycopg2
 import math
 import time
 import os
-from urllib.parse import urlparse
 
 # =========================
 # CONFIG
@@ -17,7 +16,7 @@ XP_PER_VOICE_INTERVAL = 15
 MESSAGE_COOLDOWN_SECONDS = 60
 VOICE_XP_INTERVAL_SECONDS = 60
 
-LEVEL_UP_CHANNEL_ID = 1449164944376467578  # <-- your channel ID
+LEVEL_UP_CHANNEL_ID = 1449164944376467578  # <-- YOUR CHANNEL ID
 
 # =========================
 # INTENTS
@@ -31,23 +30,19 @@ intents.voice_states = True
 bot = commands.Bot(command_prefix=BOT_PREFIX, intents=intents)
 
 # =========================
-# DATABASE (PostgreSQL)
+# DATABASE (POSTGRESQL — RAILWAY SAFE)
 # =========================
 
-DATABASE_URL = os.getenv("DATABASE_URL")
-
-url = urlparse(DATABASE_URL)
+DATABASE_URL = os.environ.get("DATABASE_URL")
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL is not set")
 
 conn = psycopg2.connect(
-    database=url.path[1:],
-    user=url.username,
-    password=url.password,
-    host=url.hostname,
-    port=url.port,
+    DATABASE_URL,
     sslmode="require"
 )
-
 cursor = conn.cursor()
+print("✅ Connected to PostgreSQL")
 
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS users (
@@ -60,7 +55,7 @@ CREATE TABLE IF NOT EXISTS users (
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS cooldowns (
     user_id BIGINT PRIMARY KEY,
-    last_message DOUBLE PRECISION
+    last_message DOUBLE PRECISION NOT NULL
 )
 """)
 
@@ -101,7 +96,7 @@ def xp_progress_bar(current_xp, level, bar_length=10):
 async def on_ready():
     await bot.tree.sync()
     voice_xp_loop.start()
-    print(f"Logged in as {bot.user}")
+    print(f"🤖 Logged in as {bot.user}")
 
 @bot.event
 async def on_message(message):
@@ -234,5 +229,8 @@ async def level(ctx):
 # START BOT
 # =========================
 
-TOKEN = os.getenv("DISCORD_TOKEN")
+TOKEN = os.environ.get("DISCORD_TOKEN")
+if not TOKEN:
+    raise RuntimeError("DISCORD_TOKEN is not set")
+
 bot.run(TOKEN)
