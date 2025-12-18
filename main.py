@@ -1,9 +1,10 @@
 import discord
 from discord.ext import commands, tasks
-import sqlite3
+import psycopg2
 import math
 import time
 import os
+from urllib.parse import urlparse
 
 # =========================
 # CONFIG
@@ -30,24 +31,36 @@ intents.voice_states = True
 bot = commands.Bot(command_prefix=BOT_PREFIX, intents=intents)
 
 # =========================
-# DATABASE
+# DATABASE (PostgreSQL)
 # =========================
 
-conn = sqlite3.connect("levels.db", check_same_thread=False)
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+url = urlparse(DATABASE_URL)
+
+conn = psycopg2.connect(
+    database=url.path[1:],
+    user=url.username,
+    password=url.password,
+    host=url.hostname,
+    port=url.port,
+    sslmode="require"
+)
+
 cursor = conn.cursor()
 
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS users (
-    user_id INTEGER PRIMARY KEY,
-    xp INTEGER,
-    level INTEGER
+    user_id BIGINT PRIMARY KEY,
+    xp INTEGER NOT NULL,
+    level INTEGER NOT NULL
 )
 """)
 
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS cooldowns (
-    user_id INTEGER PRIMARY KEY,
-    last_message REAL
+    user_id BIGINT PRIMARY KEY,
+    last_message DOUBLE PRECISION
 )
 """)
 
@@ -98,26 +111,34 @@ async def on_message(message):
     user_id = message.author.id
     now = time.time()
 
-    cursor.execute("SELECT last_message FROM cooldowns WHERE user_id=?", (user_id,))
+    cursor.execute(
+        "SELECT last_message FROM cooldowns WHERE user_id=%s",
+        (user_id,)
+    )
     cooldown = cursor.fetchone()
 
     if cooldown and now - cooldown[0] < MESSAGE_COOLDOWN_SECONDS:
         await bot.process_commands(message)
         return
 
-    cursor.execute(
-        "INSERT OR REPLACE INTO cooldowns (user_id, last_message) VALUES (?, ?)",
-        (user_id, now)
-    )
+    cursor.execute("""
+        INSERT INTO cooldowns (user_id, last_message)
+        VALUES (%s, %s)
+        ON CONFLICT (user_id)
+        DO UPDATE SET last_message = EXCLUDED.last_message
+    """, (user_id, now))
 
-    cursor.execute("SELECT xp, level FROM users WHERE user_id=?", (user_id,))
+    cursor.execute(
+        "SELECT xp, level FROM users WHERE user_id=%s",
+        (user_id,)
+    )
     data = cursor.fetchone()
 
     if data is None:
         xp = XP_PER_MESSAGE
         level = 0
         cursor.execute(
-            "INSERT INTO users (user_id, xp, level) VALUES (?, ?, ?)",
+            "INSERT INTO users (user_id, xp, level) VALUES (%s, %s, %s)",
             (user_id, xp, level)
         )
     else:
@@ -130,12 +151,11 @@ async def on_message(message):
             channel = bot.get_channel(LEVEL_UP_CHANNEL_ID)
             if channel:
                 await channel.send(
-                    f"🎉 {message.author.mention} reached **Level {level}**!\n"
-                    f"➡️ Next level at **{xp_for_level(level + 1)} XP**"
+                    f"🎉 {message.author.mention} reached **Level {level}**!"
                 )
 
         cursor.execute(
-            "UPDATE users SET xp=?, level=? WHERE user_id=?",
+            "UPDATE users SET xp=%s, level=%s WHERE user_id=%s",
             (xp, level, user_id)
         )
 
@@ -152,20 +172,17 @@ async def voice_xp_loop():
         for member in guild.members:
             if member.bot:
                 continue
-            if (
-                member.voice
-                and member.voice.channel
-                and not member.voice.self_mute
-                and not member.voice.self_deaf
-            ):
+            if member.voice and member.voice.channel:
+
                 cursor.execute(
-                    "SELECT xp, level FROM users WHERE user_id=?", (member.id,)
+                    "SELECT xp, level FROM users WHERE user_id=%s",
+                    (member.id,)
                 )
                 data = cursor.fetchone()
 
                 if data is None:
                     cursor.execute(
-                        "INSERT INTO users (user_id, xp, level) VALUES (?, ?, ?)",
+                        "INSERT INTO users (user_id, xp, level) VALUES (%s, %s, %s)",
                         (member.id, XP_PER_VOICE_INTERVAL, 0)
                     )
                 else:
@@ -178,26 +195,29 @@ async def voice_xp_loop():
                         channel = bot.get_channel(LEVEL_UP_CHANNEL_ID)
                         if channel:
                             await channel.send(
-                                f"🎉 {member.mention} reached **Level {level}** from voice chat!"
+                                f"🎉 {member.mention} reached **Level {level}** from voice!"
                             )
 
                     cursor.execute(
-                        "UPDATE users SET xp=?, level=? WHERE user_id=?",
+                        "UPDATE users SET xp=%s, level=%s WHERE user_id=%s",
                         (xp, level, member.id)
                     )
 
     conn.commit()
 
 # =========================
-# PREFIX COMMAND
+# COMMANDS
 # =========================
 
 @bot.command()
 async def level(ctx):
-    cursor.execute("SELECT xp, level FROM users WHERE user_id=?", (ctx.author.id,))
+    cursor.execute(
+        "SELECT xp, level FROM users WHERE user_id=%s",
+        (ctx.author.id,)
+    )
     data = cursor.fetchone()
 
-    if data is None:
+    if not data:
         await ctx.send("You have no level yet.")
         return
 
@@ -207,51 +227,8 @@ async def level(ctx):
     await ctx.send(
         f"⭐ **Level {level}**\n"
         f"{bar} **{percent}%**\n"
-        f"XP: **{xp} / {next_xp}**\n"
-        f"➡️ **{xp_remaining} XP** to next level"
+        f"XP: **{xp} / {next_xp}**"
     )
-
-# =========================
-# SLASH COMMANDS
-# =========================
-
-@bot.tree.command(name="level", description="Check your level and XP")
-async def slash_level(interaction: discord.Interaction):
-    await interaction.response.defer(thinking=True)
-
-    cursor.execute("SELECT xp, level FROM users WHERE user_id=?", (interaction.user.id,))
-    data = cursor.fetchone()
-
-    if data is None:
-        await interaction.followup.send("You have no level yet.", ephemeral=True)
-        return
-
-    xp, level = data
-    bar, percent, xp_remaining, next_xp = xp_progress_bar(xp, level)
-
-    await interaction.followup.send(
-        f"⭐ **Level {level}**\n"
-        f"{bar} **{percent}%**\n"
-        f"XP: **{xp} / {next_xp}**\n"
-        f"➡️ **{xp_remaining} XP** to next level"
-    )
-
-@bot.tree.command(name="leaderboard", description="View the XP leaderboard")
-async def slash_leaderboard(interaction: discord.Interaction):
-    await interaction.response.defer(thinking=True)
-
-    cursor.execute(
-        "SELECT user_id, xp, level FROM users ORDER BY xp DESC LIMIT 10"
-    )
-    rows = cursor.fetchall()
-
-    text = "🏆 **Leaderboard**\n\n"
-    for i, (user_id, xp, level) in enumerate(rows, start=1):
-        user = bot.get_user(user_id)
-        name = user.name if user else "Unknown"
-        text += f"**{i}.** {name} — Level {level} ({xp} XP)\n"
-
-    await interaction.followup.send(text)
 
 # =========================
 # START BOT
@@ -259,5 +236,3 @@ async def slash_leaderboard(interaction: discord.Interaction):
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 bot.run(TOKEN)
-
-
