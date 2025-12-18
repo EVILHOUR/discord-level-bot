@@ -229,9 +229,10 @@ async def level(ctx):
 # START BOT
 # =========================
 
-TOKEN = os.environ.get("DISCORD_TOKEN")
+TOKEN = os.environ.get("DISCORD_TOKEN", "").strip()
 if not TOKEN:
     raise RuntimeError("DISCORD_TOKEN is not set")
 
 bot.run(TOKEN)
+
 
