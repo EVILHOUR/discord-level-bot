@@ -225,7 +225,7 @@ async def level(ctx):
     )
 
 # =========================
-# SLASH COMMAND
+# SLASH COMMAND (FIXED — NO TIMEOUT)
 # =========================
 
 @bot.tree.command(
@@ -234,6 +234,8 @@ async def level(ctx):
     guild=discord.Object(id=GUILD_ID)
 )
 async def slash_level(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+
     cursor.execute(
         "SELECT xp, level FROM users WHERE user_id=%s",
         (interaction.user.id,)
@@ -241,7 +243,7 @@ async def slash_level(interaction: discord.Interaction):
     data = cursor.fetchone()
 
     if not data:
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "You have no level yet.",
             ephemeral=True
         )
@@ -250,10 +252,11 @@ async def slash_level(interaction: discord.Interaction):
     xp, level = data
     bar, percent, next_xp = xp_progress_bar(xp, level)
 
-    await interaction.response.send_message(
+    await interaction.followup.send(
         f"⭐ **Level {level}**\n"
         f"{bar} **{percent}%**\n"
-        f"XP: **{xp} / {next_xp}**"
+        f"XP: **{xp} / {next_xp}**",
+        ephemeral=True
     )
 
 # =========================
@@ -265,7 +268,3 @@ if not TOKEN:
     raise RuntimeError("DISCORD_TOKEN is not set")
 
 bot.run(TOKEN)
-
-
-
-
