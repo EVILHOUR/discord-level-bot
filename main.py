@@ -234,6 +234,7 @@ async def level(ctx):
     guild=discord.Object(id=GUILD_ID)
 )
 async def slash_level(interaction: discord.Interaction):
+    # ✅ IMMEDIATELY acknowledge the command
     await interaction.response.defer(ephemeral=True)
 
     cursor.execute(
@@ -259,6 +260,19 @@ async def slash_level(interaction: discord.Interaction):
         ephemeral=True
     )
 
+        )
+        return
+
+    xp, level = data
+    bar, percent, next_xp = xp_progress_bar(xp, level)
+
+    await interaction.followup.send(
+        f"⭐ **Level {level}**\n"
+        f"{bar} **{percent}%**\n"
+        f"XP: **{xp} / {next_xp}**",
+        ephemeral=True
+    )
+
 # =========================
 # START BOT
 # =========================
@@ -268,3 +282,4 @@ if not TOKEN:
     raise RuntimeError("DISCORD_TOKEN is not set")
 
 bot.run(TOKEN)
+
